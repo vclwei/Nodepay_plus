@@ -11,7 +11,7 @@ from core.models.account import Account
 from core.models.exceptions import CloudflareException, LoginError
 from core.nodepay_client import NodePayClient
 from core.utils.file_manager import str_to_file
-from core.utils.proxy_manager import get_proxy, release_proxy
+from core.utils.proxy_manager import parse_proxy
 from pyuseragents import random as random_useragent
 import random
 
@@ -69,7 +69,7 @@ class AccountManager:
         os.replace(temp_file, self.earnings_file)
         # logger.info(f"Updated earnings for {email}: {total_earning}")
 
-    async def process_account(self, email: str, password: str, action: str):
+    async def process_account(self, email: str, password: str, proxy_str: str, action: str):
         if self.should_stop:
             logger.info(f"Stopping process for {email}")
             return None
@@ -78,7 +78,11 @@ class AccountManager:
         retry_count = 0
         
         while retry_count < max_retries and not self.should_stop:
-            proxy_url = await get_proxy()
+            proxy_url = parse_proxy(proxy_str) if proxy_str else None
+            if not proxy_url:
+                logger.error(f"{email} | No valid proxy provided")
+                return False
+            
             user_agent = random_useragent()
             client = None
             try:
@@ -132,7 +136,6 @@ class AccountManager:
 
                 if client:
                     await client.safe_close()
-                await release_proxy(proxy_url)
             
             if self.should_stop:
                 logger.info(f"{email} | stopping process")
@@ -143,12 +146,12 @@ class AccountManager:
         logger.error(f"Max retries reached for {email} during {action}")
         return False
 
-    async def register_account(self, email: str, password: str):
-        return await self.process_account(email, password, "register")
+    async def register_account(self, email: str, password: str, proxy_str: str):
+        return await self.process_account(email, password, proxy_str, "register")
 
-    async def mining_loop(self, email: str, password: str):
+    async def mining_loop(self, email: str, password: str, proxy_str: str):
         logger.info(f"Starting mining for account {email}")
-        return await self.process_account(email, password, "mine")
+        return await self.process_account(email, password, proxy_str, "mine")
 
     def stop(self):
         logger.info("Stopping AccountManager")

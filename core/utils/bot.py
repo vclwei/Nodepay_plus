@@ -17,18 +17,22 @@ class Bot:
         self.captcha_service = captcha_service
         self.account_manager = AccountManager(threads, ref_codes, captcha_service)
         self.should_stop = False
-        self.accounts: List[str] = file_to_list(account_path)
+        
+        # 直接读取账号信息，包含代理
+        self.accounts = file_to_list(account_path)
         logger.success(f'Found {len(self.accounts)} accounts')
-        load_proxy(proxy_path)
-        logger.success(f'Found {len(proxy_manager.proxies)} proxies')
         self.delay_range = delay_range
         self.running_tasks = []
 
     async def process_account(self, account):
-        email, password = account.split(':', 1)
+        # 解析账号信息
+        parts = account.split(',', 1)
+        account_info = parts[0]
+        proxy_str = parts[1].strip() if len(parts) > 1 else None
+        email, password = account_info.split(':', 1)
 
         while not self.should_stop:
-            result = await self.account_manager.mining_loop(email, password)
+            result = await self.account_manager.mining_loop(email, password, proxy_str)
             if result is True:
                 # logger.info(f"Account {email} completed mining cycle. Waiting 50 minutes.")
                 await asyncio.sleep(60 * 50)  # Wait 50 minutes
