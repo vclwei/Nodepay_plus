@@ -7,7 +7,6 @@ import random
 from core.utils import proxy_manager
 from core.utils.account_manager import AccountManager
 from core.utils.file_manager import file_to_list
-from core.utils.proxy_manager import load_proxy
 
 
 class Bot:

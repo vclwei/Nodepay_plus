@@ -12,7 +12,6 @@ from core.models.exceptions import CloudflareException, LoginError
 from core.nodepay_client import NodePayClient
 from core.utils.file_manager import str_to_file
 from core.utils.proxy_manager import parse_proxy
-from pyuseragents import random as random_useragent
 import random
 
 
@@ -83,7 +82,7 @@ class AccountManager:
                 logger.error(f"{email} | No valid proxy provided")
                 return False
             
-            user_agent = random_useragent()
+            user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
             client = None
             try:
                 logger.info(f"{email} | {action.capitalize()}")

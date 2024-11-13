@@ -32,7 +32,7 @@ class BaseClient:
             await self.session.close()
 
         self.session = AsyncSession(
-            impersonate="chrome110",
+            impersonate="chrome116",
             headers=self.headers,
             # proxies={'http': proxy, 'https': proxy} if proxy else None,
             verify=False
