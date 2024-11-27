@@ -1,3 +1,4 @@
+import hashlib
 import random
 import time
 import uuid
@@ -45,14 +46,16 @@ class NodePayClient(BaseClient):
             json.dump(tokens, f)
 
     @classmethod
-    def get_saved_token(cls, email):
+    def get_saved_token(cls, email, proxy):
         tokens = cls.load_tokens()
-        return tokens.get(email, {}).get('token'), tokens.get(email, {}).get('uid')
+        key = hashlib.md5(f"{email}:{proxy}".encode()).hexdigest()
+        return tokens.get(key, {}).get('token'), tokens.get(key, {}).get('uid'), tokens.get(key, {}).get('browser_id')
 
     @classmethod
-    def save_token(cls, email, uid, token):
+    def save_token(cls, email, proxy, uid, token, browser_id):
         tokens = cls.load_tokens()
-        tokens[email] = {'uid': uid, 'token': token}
+        key = hashlib.md5(f"{email}:{proxy}".encode()).hexdigest()
+        tokens[key] = {'uid': uid, 'email': email, 'proxy': proxy, 'browser_id': browser_id, 'token': token}
         cls.save_tokens(tokens)
 
     async def validate_token(self, token):
@@ -72,7 +75,7 @@ class NodePayClient(BaseClient):
     async def safe_close(self):
         await self.close_session()
 
-    def _auth_headers(self):
+    def _noauth_headers(self):
         return {
             'accept': '*/*',
             'accept-language': 'en-US,en;q=0.9',
@@ -80,18 +83,27 @@ class NodePayClient(BaseClient):
             'origin': 'https://app.nodepay.ai',
             'priority': 'u=1, i',
             'referer': 'https://app.nodepay.ai/',
-            'sec-ch-ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+            'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not?A_Brand";v="99"',
             'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'none',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'cross-site',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            'accept-encoding': 'gzip, deflate, br, zstd',
+            'user-agent': "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         }
+    
+    def _authed_headers(self, access_token: str):
+        headers = self._noauth_headers()
+        headers.update({"authorization": f"Bearer {access_token}"})
+        return headers
 
     def _ping_headers(self, access_token: str):
-        headers = self._auth_headers()
-        return headers.update({"Authorization": f"Bearer {access_token}"}) or headers
+        headers = self._authed_headers(access_token)
+        headers.update({"origin": "chrome-extension://lgmpfmgeabnnlemejacfljbmonaomfmm"})
+        headers.pop("referer")
+        return headers
+    
 
     async def register(self, ref_code: str, captcha_service):
         captcha_token = await captcha_service.get_captcha_token_async()
@@ -108,7 +120,7 @@ class NodePayClient(BaseClient):
         return await self.make_request(
             method='POST',
             url='https://api.nodepay.org/api/auth/register?',
-            headers=self._auth_headers(),
+            headers=self._noauth_headers(),
             json_data=json_data
         )
 
@@ -120,7 +132,7 @@ class NodePayClient(BaseClient):
     )
     async def login(self, captcha_service):
         captcha_token = await captcha_service.get_captcha_token_async()
-        headers = self._auth_headers()
+        headers = self._noauth_headers()
 
         json_data = {
             'user': self.email,
@@ -131,7 +143,7 @@ class NodePayClient(BaseClient):
 
         response = await self.make_request(
             method='POST',
-            url='https://api.nodepay.org/api/auth/login',
+            url='https://api.nodepay.org/api/auth/login?',
             headers=headers,
             json_data=json_data
         )
@@ -158,20 +170,22 @@ class NodePayClient(BaseClient):
         response = await self.make_request(
             method='GET',
             url='https://api.nodepay.org/api/earn/info?',
-            headers=self._ping_headers(access_token)
+            headers=self._authed_headers(access_token)
         )
         return response['data'].get('total_earning', 0)
 
     async def get_auth_token(self, captcha_service):
-        saved_token, saved_uid = self.get_saved_token(self.email)
+        saved_token, saved_uid, saved_browser_id = self.get_saved_token(self.email, self.proxy)
         
         if saved_token:
+            logger.info(f"HitCache email={self.email} proxy={self.proxy} uid={saved_uid} browser_id={saved_browser_id} token={saved_token}")
             if await self.validate_token(saved_token):
-                return saved_uid, saved_token
+                return saved_uid, saved_token, saved_browser_id
 
         uid, token = await self.login(captcha_service)
-        self.save_token(self.email, uid, token)
-        return uid, token
+        self.browser_id = str(uuid.uuid4())
+        self.save_token(self.email, self.proxy, uid, token, self.browser_id)
+        return uid, token, self.browser_id
 
     async def ping(self, uid: str, access_token: str):
         json_data = {

@@ -32,7 +32,7 @@ class BaseClient:
             await self.session.close()
 
         self.session = AsyncSession(
-            impersonate="chrome116",
+            impersonate="chrome124",
             headers=self.headers,
             # proxies={'http': proxy, 'https': proxy} if proxy else None,
             verify=False
@@ -58,14 +58,17 @@ class BaseClient:
                     timeout=30,
                     proxy=self.proxy
                 )
+                logger.info(f"{method} {url} status: {response.status_code}")
+                if method == 'OPTIONS':
+                    return response
+
                 if response.status_code in [403, 400]:
                     raise CloudflareException('Cloudflare protection detected')
                 
                 try:
                     response_json = response.json()
                 except json.JSONDecodeError:
-                    logger.error(f"Failed to parse JSON response: {response.text}")
-                    raise
+                    continue
                 
                 if not response.ok:
                     error_msg = response_json.get('error', 'Unknown error')

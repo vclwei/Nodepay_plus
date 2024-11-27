@@ -33,8 +33,8 @@ class Bot:
         while not self.should_stop:
             result = await self.account_manager.mining_loop(email, password, proxy_str)
             if result is True:
-                # logger.info(f"Account {email} completed mining cycle. Waiting 50 minutes.")
-                await asyncio.sleep(60 * 50)  # Wait 50 minutes
+                logger.info(f"Account {email} completed mining cycle. Waiting 55 minutes.")
+                await asyncio.sleep(60 * 55)  # Wait 50 minutes
             elif result == "exit":
                 logger.info(f"{email} | Stop account due to login error")
                 break
