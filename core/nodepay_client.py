@@ -21,11 +21,10 @@ warnings.filterwarnings("ignore", category=UserWarning, message="Curlm alread cl
 class NodePayClient(BaseClient):
     TOKENS_FILE = 'data/tokens_db.json'
 
-    def __init__(self, email: str = '', password: str = '', proxy: str = '', user_agent: str = ''):
+    def __init__(self, email: str = '', password: str = '', proxy: str = ''):
         super().__init__()
         self.email = email
         self.password = password
-        self.user_agent = user_agent
         self.proxy = proxy
         self.browser_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, self.proxy or ""))
 
@@ -61,7 +60,7 @@ class NodePayClient(BaseClient):
     async def validate_token(self, token):
         try:
             # Try to use the token to get info - if it fails, token is invalid
-            await self.info(token)
+            await self.ext_get_session(token)
             return True
         except CloudflareException as e:
             raise CloudflareException(e)
@@ -69,7 +68,7 @@ class NodePayClient(BaseClient):
             return False
 
     async def __aenter__(self):
-        await self.create_session(self.proxy, self.user_agent)
+        await self.create_session(self.proxy)
         return self
 
     async def safe_close(self):
@@ -78,15 +77,15 @@ class NodePayClient(BaseClient):
     def _noauth_headers(self):
         return {
             'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
+            'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-TW;q=0.6',
             'content-type': 'application/json',
             'origin': 'https://app.nodepay.ai',
             'priority': 'u=1, i',
             'referer': 'https://app.nodepay.ai/',
-            'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not?A_Brand";v="99"',
+            'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-platform': '"macOS"',
-            'sec-fetch-dest': 'none',
+            'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'cross-site',
             'accept-encoding': 'gzip, deflate, br, zstd',
@@ -95,13 +94,17 @@ class NodePayClient(BaseClient):
     
     def _authed_headers(self, access_token: str):
         headers = self._noauth_headers()
-        headers.update({"authorization": f"Bearer {access_token}"})
+        headers["authorization"] = f"Bearer {access_token}"
         return headers
 
     def _ping_headers(self, access_token: str):
         headers = self._authed_headers(access_token)
-        headers.update({"origin": "chrome-extension://lgmpfmgeabnnlemejacfljbmonaomfmm"})
+        headers["sec-fetch-site"] = "none"
+        headers["origin"] = "chrome-extension://lgmpfmgeabnnlemejacfljbmonaomfmm"
         headers.pop("referer")
+        headers.pop("sec-ch-ua")
+        headers.pop("sec-ch-ua-mobile")
+        headers.pop("sec-ch-ua-platform")
         return headers
     
 
@@ -125,15 +128,23 @@ class NodePayClient(BaseClient):
         )
 
     @retry(
-        stop=stop_after_attempt(5),
+        stop=stop_after_attempt(10),
         retry=retry_if_not_exception_type(LoginError),
         reraise=True,
         # before_sleep=lambda retry_state, **kwargs: logger.info(f"{retry_state.outcome.exception()}"),
     )
     async def login(self, captcha_service):
-        captcha_token = await captcha_service.get_captcha_token_async()
-        headers = self._noauth_headers()
+        options_headers = self._noauth_headers()
+        options_headers["access-control-request-method"] = "POST"
+        options_headers["access-control-request-headers"] = "authorization,content-type"
 
+        response = await self.make_request(
+            method='OPTIONS',
+            url='https://api.nodepay.org/api/auth/login?',
+            headers=options_headers
+        )
+        
+        captcha_token = await captcha_service.get_captcha_token_async()
         json_data = {
             'user': self.email,
             'password': self.password,
@@ -141,6 +152,7 @@ class NodePayClient(BaseClient):
             'recaptcha_token': captcha_token
         }
 
+        headers = self._noauth_headers()
         response = await self.make_request(
             method='POST',
             url='https://api.nodepay.org/api/auth/login?',
@@ -150,9 +162,6 @@ class NodePayClient(BaseClient):
 
         if not response.get("success"):
             msg = response.get("msg")
-            # if response.get("code") == -102:
-            #     raise LoginError(msg)
-
             raise LoginError(msg)
 
         return response['data']['user_info']['uid'], response['data']['token']
@@ -173,19 +182,28 @@ class NodePayClient(BaseClient):
             headers=self._authed_headers(access_token)
         )
         return response['data'].get('total_earning', 0)
+    
+    async def ext_get_session(self, access_token: str):
+        response = await self.make_request(
+            method='POST',
+            url='https://api.nodepay.org/api/auth/session',
+            headers=self._ping_headers(access_token)
+        )
+        return response['data'].get('balance', {}).get('total_collected', 0)
 
     async def get_auth_token(self, captcha_service):
         saved_token, saved_uid, saved_browser_id = self.get_saved_token(self.email, self.proxy)
         
         if saved_token:
-            logger.info(f"HitCache email={self.email} proxy={self.proxy} uid={saved_uid} browser_id={saved_browser_id} token={saved_token}")
+            logger.info(f"HitCache email={self.email} proxy={self.proxy} browser_id={saved_browser_id}")
+            self.browser_id = saved_browser_id
             if await self.validate_token(saved_token):
-                return saved_uid, saved_token, saved_browser_id
+                return saved_uid, saved_token
 
         uid, token = await self.login(captcha_service)
-        self.browser_id = str(uuid.uuid4())
+        
         self.save_token(self.email, self.proxy, uid, token, self.browser_id)
-        return uid, token, self.browser_id
+        return uid, token
 
     async def ping(self, uid: str, access_token: str):
         json_data = {
@@ -203,7 +221,7 @@ class NodePayClient(BaseClient):
                 json_data=json_data
             )
             
-            return await self.info(access_token)
+            return await self.ext_get_session(access_token)
         except Exception as e:
             tokens = self.load_tokens()
             if self.email in tokens:

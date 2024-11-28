@@ -10,31 +10,17 @@ import asyncio
 
 class BaseClient:
     def __init__(self):
-        self.headers = None
         self.session = None
         self.proxy = None
-        self.user_agent = None
 
-    async def create_session(self, proxy=None, user_agent=None):
+    async def create_session(self, proxy=None):
         self.proxy = proxy
-        self.headers = {
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/json',
-            'origin': 'chrome-extension://lgmpfmgeabnnlemejacfljbmonaomfmm',
-            'priority': 'u=1, i',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'none',
-            'user-agent': user_agent,
-        }
         if self.session:
             await self.session.close()
 
         self.session = AsyncSession(
             impersonate="chrome124",
-            headers=self.headers,
-            # proxies={'http': proxy, 'https': proxy} if proxy else None,
+            proxies={'http': self.proxy, 'https': self.proxy} if self.proxy else None,
             verify=False
         )
 
@@ -45,11 +31,12 @@ class BaseClient:
 
     async def make_request(self, method: str, url: str, headers: dict = None, json_data: dict = None, max_retries: int = 3):
         if not self.session:
-            await self.create_session(self.proxy, self.user_agent)
+            await self.create_session(self.proxy)
 
         retry_count = 0
         while retry_count < max_retries:
             try:
+                # logger.info(f"Before Request Cookies: {self.session.cookies}")
                 response = await self.session.request(
                     method=method,
                     url=url,
@@ -58,12 +45,14 @@ class BaseClient:
                     timeout=30,
                     proxy=self.proxy
                 )
-                logger.info(f"{method} {url} status: {response.status_code}")
-                if method == 'OPTIONS':
-                    return response
+                logger.info(f"{url} | {method} | status: {response.status_code}")
+                # logger.info(f"After Request Cookies: {self.session.cookies}")
 
                 if response.status_code in [403, 400]:
                     raise CloudflareException('Cloudflare protection detected')
+                
+                if method == 'OPTIONS':
+                    return response
                 
                 try:
                     response_json = response.json()
@@ -91,7 +80,7 @@ class BaseClient:
                 await asyncio.sleep(2)  # Wait before retrying
 
     async def __aenter__(self):
-        await self.create_session(self.proxy, self.user_agent)
+        await self.create_session(self.proxy)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

@@ -82,12 +82,11 @@ class AccountManager:
                 logger.error(f"{email} | No valid proxy provided")
                 return False
             
-            user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             client = None
             try:
                 logger.info(f"{email} | {action.capitalize()}")
 
-                client = NodePayClient(email=email, password=password, proxy=proxy_url, user_agent=user_agent)
+                client = NodePayClient(email=email, password=password, proxy=proxy_url)
                 async with client:
                     if action == "register":
                         ref_code = random.choice([random.choice(self.ref_codes or [None]),
@@ -106,8 +105,12 @@ class AccountManager:
                         str_to_file('new_accounts.txt', f'{email}:{password}')
                         logger.success(f'{email} | registered')
                     elif action == "mine":
-                        uid, access_token, browser_id = await client.get_auth_token(self.captcha_service)
-                        client.browser_id = browser_id
+                        uid, access_token = await client.get_auth_token(self.captcha_service)
+
+                        total_earning = await client.ext_get_session(access_token)
+                        self.update_earnings(email, total_earning)
+                        logger.success(f"{email} | Points: {total_earning}")
+
                         total_earning = await client.ping(uid, access_token)
                         self.update_earnings(email, total_earning)
                         logger.success(f"{email} | Points: {total_earning}")
