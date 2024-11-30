@@ -6,3 +6,6 @@ class LoginError(Exception):
 
 class TokenError(Exception):
     pass
+
+class MineError(Exception):
+    pass

@@ -10,7 +10,7 @@ from random_username.generate import generate_username
 from tenacity import retry, stop_after_attempt, retry_if_not_exception_type
 
 from core.base_client import BaseClient
-from core.models.exceptions import LoginError, TokenError, CloudflareException
+from core.models.exceptions import LoginError, TokenError, CloudflareException, MineError
 from core.utils import logger
 from core.utils.person import Person
 
@@ -204,7 +204,13 @@ class NodePayClient(BaseClient):
         
         self.save_token(self.email, self.proxy, uid, token, self.browser_id)
         return uid, token
-
+    
+    @retry(
+        stop=stop_after_attempt(5),  # 最多重试5次
+        wait_fixed=60,  # 每次重试间隔60秒
+        retry=retry_if_not_exception_type((TokenError)),  # TokenError
+        reraise=True
+    )
     async def ping(self, uid: str, access_token: str):
         json_data = {
             'id': uid,
@@ -213,18 +219,49 @@ class NodePayClient(BaseClient):
             'version': '2.2.7'
         }
 
-        try:
-            await self.make_request(
-                method='POST',
-                url='https://nw.nodepay.org/api/network/ping',
-                headers=self._ping_headers(access_token),
-                json_data=json_data
-            )
+        res = await self.make_request(
+            method='POST',
+            url='https://nw.nodepay.org/api/network/ping',
+            headers=self._ping_headers(access_token),
+            json_data=json_data
+        )
+
+        if not res.get('success'):
+            code = res.get('code', '')
+            if code == -240:
+                # Token invalid
+                tokens = self.load_tokens()
+                key = hashlib.md5(f"{self.email}:{self.proxy}".encode()).hexdigest()
+                if key in tokens:
+                    del tokens[key]
+                    self.save_tokens(tokens)
+                raise TokenError("Token invalid or expired")
+            else:
+                raise MineError(res.get('msg', 'Unknown mining error'))
+
+        return True
+
+    # async def ping(self, uid: str, access_token: str):
+        
+    #     json_data = {
+    #         'id': uid,
+    #         'browser_id': self.browser_id,
+    #         'timestamp': int(time.time()),
+    #         'version': '2.2.7'
+    #     }
+
+    #     try:
+    #         await self.make_request(
+    #             method='POST',
+    #             url='https://nw.nodepay.org/api/network/ping',
+    #             headers=self._ping_headers(access_token),
+    #             json_data=json_data
+    #         )
             
-            return await self.ext_get_session(access_token)
-        except Exception as e:
-            tokens = self.load_tokens()
-            if self.email in tokens:
-                del tokens[self.email]
-                self.save_tokens(tokens)
-            raise TokenError("Token invalid or expired") from e
+    #         return await self.ext_get_session(access_token)
+    #     except Exception as e:
+    #         tokens = self.load_tokens()
+    #         if self.email in tokens:
+    #             del tokens[self.email]
+    #             self.save_tokens(tokens)
+    #         raise TokenError("Token invalid or expired") from e

@@ -121,7 +121,7 @@ class AccountManager:
                             password=password,
                             uid=uid,
                             access_token=access_token,
-                            user_agent=user_agent,
+                            user_agent=None,
                             proxy_url=proxy_url
                         )
                     return True
