@@ -7,7 +7,7 @@ import json
 import os
 
 from random_username.generate import generate_username
-from tenacity import retry, stop_after_attempt, retry_if_not_exception_type
+from tenacity import retry, stop_after_attempt, retry_if_not_exception_type, wait_fixed
 
 from core.base_client import BaseClient
 from core.models.exceptions import LoginError, TokenError, CloudflareException, MineError
@@ -207,8 +207,8 @@ class NodePayClient(BaseClient):
     
     @retry(
         stop=stop_after_attempt(5),  # 最多重试5次
-        wait_fixed=60,  # 每次重试间隔60秒
-        retry=retry_if_not_exception_type((TokenError)),  # TokenError
+        wait=wait_fixed(60),  # 每次重试间隔60秒
+        retry=retry_if_not_exception_type((TokenError, MineError)),  # TokenError 和 MineError 不重试
         reraise=True
     )
     async def ping(self, uid: str, access_token: str):
