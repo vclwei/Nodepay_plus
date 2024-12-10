@@ -9,7 +9,7 @@ termcolor~=2.5.0
 flet~=0.24.1
 customtkinter~=5.2.2
 pillow~=11.0.0
-curl_cffi~=0.7.3
+curl_cffi~=0.8.0b7
 random-username~=1.0.2
 better-proxy==1.2.0
 anticaptchaofficial
